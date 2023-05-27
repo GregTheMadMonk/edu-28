@@ -1,3 +1,5 @@
 # Greg's .gitignore
 .ipynb_checkpoints/*
 task/data/raw_data/*
+simulator/__pycache__/*
+doc/*
