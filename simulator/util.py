@@ -9,10 +9,8 @@
 
 import numpy             as np
 import matplotlib.pyplot as plt
-from numba           import njit
-from multiprocessing import Pool
 
-from . import prob
+from . import cpp
 
 def plotSignals(*signals, **namedSignals):
     """!
@@ -27,93 +25,15 @@ def plotSignals(*signals, **namedSignals):
         plt.plot(signal[0], signal[1], label=name)
     plt.legend()
 
-print("Initializing parallel tasks queue...")
-tasks = [] # Parallel tasks queue
-
-def parallelRunner(idx):
-    """!
-    \brief Runs a task from a task pool
-
-    \param idx - index of the task to run
-    """
-    np.random.seed() # Each thread should have its own random seed
-    return tasks[idx]()
-
-def runInParallel(amount, poolSize, what, *args):
-    """!
-    \brief Runs in parallel several instances of the function
-
-    This function is used to gather staticstics.
-    It does not pass any index to the function.
-    All of the runs are identical from the caller standpoint.
-
-    \param amount   - final amount of runs
-    \param poolSize - process pool size. Passed directly to `multiprocessing.Pool`.
-                      Set to `None` to use automatic value.
-    \param what     - a function (or functor) to run
-    \param args     - function arguments
-
-    kwargs aren't supported by numba
-    """
-    # Clean some of the old tasks
-    global tasks
-    while len(tasks) > 10:
-        del tasks[0]
-    
-    # Add our task
-    idx = len(tasks)
-    tasks.append(lambda: what(*args))
-    
-    # Run threads
-    with Pool(poolSize) as pool:
-        return pool.map(
-            parallelRunner,
-            [ idx for i in range(amount) ]
-        )
-
-@njit
-def bulkRunnerHelper(bulkSize, what, *args):
-    """!
-    \brief Returns a result of bulk-execution of function
-
-    A helper for \ref runInParallelBulk
-    """
-    return [ what(*args) for i in range(bulkSize) ]
-
-def runInParallelBulk(bulkNum, bulkSize, poolSize, what, *args):
-    """!
-    \brief Runs a bulk of cheap tasks in parallel
-
-    'Cheap' tasks don't benefit from parallelization since the thread
-    creationg cost exceeds the task cost.
-    It is still possible to gain the advantage by concurrently running
-    several sequential executions of such tasks.
-
-    kwargs aren't supported by numba
-
-    \param bulkNum  - number of tasks to process
-    \param bulkSize - number of sequential runs of `what` in one task
-    \param poolSize - see \ref runInParallel
-    \param what     - see \ref runInParallel
-    \param args     - see \ref runInParallel
-
-    Total amount of runs equals `bulkNum * bulkSize`
-    """
-    return [
-        elem for runResult in runInParallel(
-            bulkNum, poolSize,
-            bulkRunnerHelper, bulkSize, what, *args
-        ) for elem in runResult
-    ]
-
-def loadExperimentalSignal(filename, separator='\t'):
+def loadExperimentalSignal(filename, separator='\t', trimLength = 20):
     """!
     \brief Loads a signal shape from Numass experimental data file
 
     Uses tabs by default, changed with `separator`
 
-    \param filename  - data file name
-    \param separator - file column separator
+    \param filename   - data file name
+    \param separator  - file column separator
+    \param trimLength - trim the signal after this value. Set to None to disable
     """
     signal = ( [], [] )
     with open(filename) as sigFile:
@@ -133,7 +53,14 @@ def loadExperimentalSignal(filename, separator='\t'):
             signal[0].append(point[0])
             signal[1].append(sum(point[1:]))
     
-    return ( np.array(signal[0]), prob.probNormalize(np.array(signal[0]), np.array(signal[1])) )
+    E = np.array(signal[0])
+    P = np.array(signal[1])
+
+    if trimLength is not None:
+        P = P[E <= trimLength]
+        E = E[E <= trimLength]
+
+    return ( E, cpp.get().probNormalize(E, P) )
 
 def readHistFile(filename, separator=' '):
     """!

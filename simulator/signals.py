@@ -6,99 +6,8 @@ from numba import njit
 import numpy             as np
 import matplotlib.pyplot as plt
 
+from . import cpp
 from . import util
-from . import prob
-
-@njit
-def composeSignals(
-    signal1, signal2,
-    offset,
-    amp1, amp2
-):
-    """!
-    \brief Performs a composition of signals
-
-    \param signal1 - first signal
-    \param signal2 - second signal
-    \param offset  - offset of the second signal relative to the first one
-    \param amp1    - first signal multiplier
-    \param amp2    - second signal multiplier
-
-    \throws RuntimeError if signal grids aren't aligned
-    """
-    signal = ( signal1[0].copy(), signal1[1].copy() * amp1 )
-    for E2 in signal2[0]:
-        index2 = np.where(signal2[0] == E2)[0][0]
-        E1 = E2 + offset
-        if E1 in signal1[0]:
-            index1 = np.where(signal[0] == E1)[0][0]
-            signal[1][index1] += signal2[1][index2] * amp2
-        elif E1 >= np.min(signal1[0]) and E1 <= np.max(signal1[0]):
-            raise RuntimeError("Signal grids aren't aligned")
-    
-    return signal
-
-@njit
-def integrateSignal(signal, intFrom, intTo):
-    """!
-    \brief "Integrates" the given signal in the interval
-
-    Integration is performed by summing signal's `Y` values
-
-    \param signal  - given signal
-    \param intFrom - _absolute_ left integration boundary
-    \param intTo   - _absolute_ right integration boundary
-    """
-    return np.sum(
-        signal[1][
-            np.logical_and(
-                signal[0] >= intFrom,
-                signal[0] <= intTo
-            )
-        ]
-    )
-
-@njit
-def integrateSignalRelative(signal, offsetLeft, offsetRight, center = 9):
-    """!
-    \brief "Integrates" the given signal in the interval
-           given via offests relative to the point
-           
-    \param signal      - given signal
-    \param offsetLeft  - left integration boundary offset relative to the center.
-                         Same as intLeft = center - offsetLeft
-    \param offsetRight - right integration boundary offset relative to the center.
-                         Same as intRight = center + offsetRight
-    \param center      - A point inside integration interval that offsets relate to
-    """
-    return integrateSignal(signal, center - offsetLeft, center + offsetRight)
-
-@njit
-def rollDoubleOverlap(P, E, signal, offsetLeft, offsetRight):
-    """!
-    \brief Perform a full roll for two-signal overlap
-
-    Offset is determined as a uniformly distributed random integer from 0 to 42
-    Amplitudes are determined as random values with distribution given by `P` and `E`
-
-    \param P           - distribution P
-    \param E           - distribution E
-    \param signal      - signal shape
-    \param offsetLeft  - left integration border offset relative to 9
-    \param offsetRight - right integration border offset relative to 9
-
-    See \ref integrateSignalRelative for better explaination of `offsetLeft` and `offsetRight`
-    """
-    offset = np.floor(np.random.uniform(0, 43))
-    amp1 = prob.rollVal(P, E)
-    amp2 = prob.rollVal(P, E)
-    
-    return np.array([
-        offset,
-        amp1,
-        amp2,
-        integrateSignalRelative(composeSignals(signal, signal, offset, amp1, amp2), offsetLeft, offsetRight)
-    ])
 
 class SignalTester:
     """!
@@ -108,60 +17,50 @@ class SignalTester:
         """!
         \brief Initialze runner
         
-        \param P, E   - amplitude distribution P, E
-        \param signal - signal shape
+        \param P, E      - amplitude distribution P, E
+        \param signal    - signal shape
+        \param useCppMod - custom roll function
         """
         self.P = P
         self.E = E
         self.signal = signal
         self.result = None
     
-    def run(self, offsetLeft, offsetRight, numRolls=10_000_000, bulkNum=100):
+    def run(self, offsetLeft, offsetRight, numRolls=10_000_000):
         """!
         \brief Run `numRolls` double overlap simulations
         
         \param offsetLeft  - left border of integration offset relative to 9
         \param offsetRight - right border of integration offset relative to 9
         \param numRolls    - number of rolls
-        \param bulkNum     - number of parallel processes
         """
         self.result = {
             "left":  offsetLeft,
             "right": offsetRight,
             "data":  np.array(
-                util.runInParallelBulk(
-                    bulkNum, numRolls / bulkNum, None,
-                    rollDoubleOverlap,
-                    self.P, self.E, self.signal,
-                    offsetLeft, offsetRight
+                cpp.get().toList(
+                    cpp.get().rollDoubleOverlapBulk(
+                        numRolls,
+                        self.E, self.P, self.signal,
+                        offsetLeft, offsetRight
+                    )
                 )
             )
         }
     
-    def runSingle(self, offsetLeft, offsetRight, numRolls=10_000_000, bulkNum=100):
+    def runSingle(self, offsetLeft, offsetRight, numRolls=10_000_000):
         """!
         \brief Run `numRolls` single signal simulations
         
         \param offsetLeft  - left border of integration offset relative to 9
         \param offsetRight - right border of integration offset relative to 9
         \param numRolls    - number of rolls
-        \param bulkNum     - number of parallel processes
         """
-        amps = util.runInParallelBulk(
-            bulkNum, numRolls / bulkNum, None,
-            prob.rollVal, self.P, self.E
-        )
         self.result = {
             "left":       offsetLeft,
             "right":      offsetRight,
             "dataSingle": np.array(
-                [
-                    integrateSignalRelative(
-                        ( self.signal[0], self.signal[1] * amp ),
-                        offsetLeft, offsetRight
-                    )
-                    for amp in amps
-                ]
+                cpp.get().rollSingleBulk(numRolls, self.E, self.P, self.signal, offsetLeft, offsetRight)
             )
         }
     
