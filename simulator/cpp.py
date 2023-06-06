@@ -29,7 +29,7 @@ def get(realType = None):
         print(f"Loading C++ submodule from {CPP_BASE_PATH}")
         __cppmod = load(
             name = "cpp",
-            build_directory = CPP_BASE_PATH,
+            build_directory = f"{CPP_BASE_PATH}/build",
             sources = f"{CPP_BASE_PATH}/extension.cc",
             extra_cflags = [ f"-DREAL={realType} -O3 -std=c++20 -DNDEBUG" ],
             verbose = False

@@ -2,4 +2,5 @@
 .ipynb_checkpoints/*
 task/data/raw_data/*
 simulator/__pycache__/*
+simulator/cpp/build/*
 doc/latex/*
